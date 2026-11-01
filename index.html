@@ -15,7 +15,7 @@
 .toolbar select{max-width:220px}
 @media(max-width:480px){main{padding:10px}section{padding:12px;margin:10px 0}h2{font-size:1.17rem}button{min-height:44px}}
 </style></head><body><header><h1>🏈 Fantasy Blind Spot</h1><div>MY INJURY WATCH · Multi-platform</div></header><main>
-<section id="dashboard"><h2>🏈 My Fantasy Teams</h2><p class="muted">Tap a team to see its players. No more scrolling through every roster.</p><div id="teamTabs" class="tabs" role="tablist" aria-label="Fantasy teams"></div><p id="storageNotice" class="muted" role="status"></p><button type="button" id="backupRosters" class="secondary">⬇️ Back up my teams</button><button id="addToggle" type="button" class="secondary" aria-expanded="false" aria-controls="connectionSection">＋ Add another fantasy league</button></section>
+<section id="dashboard"><h2>🏈 My Fantasy Teams</h2><p class="muted">Tap a team to see its players. No more scrolling through every roster.</p><div id="teamTabs" class="tabs" role="tablist" aria-label="Fantasy teams"></div><p id="storageNotice" class="muted" role="status"></p><button type="button" id="backupRosters" class="secondary">⬇️ Back up my teams</button><label class="muted" for="restoreRosters">Restore a previous backup (if available)</label><input id="restoreRosters" type="file" accept=".json,application/json"><button id="addToggle" type="button" class="secondary" aria-expanded="false" aria-controls="connectionSection">＋ Add another fantasy league</button></section>
 <section id="connectionSection" class="hide"><h2>Connect your fantasy league</h2><label for="platform">Platform</label><select id="platform"><option value="mfl">MyFantasyLeague · Active</option><option value="sleeper">Sleeper · Active</option><option value="yahoo">Yahoo · Coming after API approval</option><option value="espn">ESPN · Public leagues beta</option><option value="nfl">NFL Fantasy · Integration pending</option></select><p id="platformNote" class="muted"></p><p id="fieldInstructions" class="muted">Enter your MFL league ID or link and franchise name. No individual player entry.</p>
 <div id="leagueFields"><div class="row"><div><label id="leagueLabel" for="league">MFL league ID or link</label><input id="league" value="36119" autocomplete="off"></div><div><label for="year">Season</label><input id="year" type="number" value="2026" min="2020" max="2030"></div></div>
 <div id="sleeperName" class="hide"><label for="username">Sleeper username (if no league ID)</label><input id="username" placeholder="Sleeper username"><button type="button" id="allSleeper" class="secondary">⚡ Import ALL my Sleeper leagues</button><p class="muted">Uses your Sleeper username, no password. Imports the rosters owned by your account across 2026 leagues.</p></div><label for="team">Your fantasy franchise name</label><input id="team" value="Space Monkey Mafia"></div><div id="unavailableFields" class="hide" role="status"><h3 id="upcomingTitle"></h3><p id="upcomingMessage"></p><p class="muted">We will not ask for an MFL franchise name or password for this platform.</p></div>
@@ -66,6 +66,20 @@ el('backupRosters').addEventListener('click',()=>{
  const payload=JSON.stringify({format:'fantasy-blind-spot-backup-v1',exportedAt:new Date().toISOString(),teams:saved},null,2);
  const file=new Blob([payload],{type:'application/json'});
  const url=URL.createObjectURL(file),a=document.createElement('a');a.href=url;a.download='fantasy-blind-spot-team-backup.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)
+});
+el('restoreRosters').addEventListener('change',async e=>{
+ const file=e.target.files?.[0];if(!file)return;
+ try{
+  if(file.size>4000000)throw Error('Backup exceeds 4 MB. Please select a Fantasy Blind Spot backup.');
+  const data=JSON.parse(await file.text());
+  if(data.format!=='fantasy-blind-spot-backup-v1'||!Array.isArray(data.teams))throw Error('This is not a Fantasy Blind Spot team backup.');
+  const incoming=data.teams.filter(x=>x&&typeof x.key==='string'&&x.team&&typeof x.team.name==='string'&&Array.isArray(x.players));
+  if(!incoming.length)throw Error('No valid teams found in this backup.');
+  const combined=[...incoming,...saved.filter(x=>!incoming.some(y=>y.key===x.key))];
+  const old=localStorage.getItem('fbs_saved_leagues');if(old)localStorage.setItem('fbs_saved_leagues_backup',old);
+  localStorage.setItem('fbs_saved_leagues',JSON.stringify(combined));saved=combined;storageWarning='Restored '+incoming.length+' team(s). Existing different teams were preserved.';showLeague(0);
+ }catch(err){storageWarning='Restore failed: '+err.message;showSaved()}
+ e.target.value='';
 });
 el('teamTabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.allwatch)allWatch();else if(b.dataset.index!==undefined)showLeague(Number(b.dataset.index))});
 el('addToggle').addEventListener('click',()=>{const box=el('connectionSection'),open=box.classList.toggle('hide')===false;el('addToggle').setAttribute('aria-expanded',String(open));el('addToggle').textContent=open?'✕ Close add league':'＋ Add another fantasy league'});
