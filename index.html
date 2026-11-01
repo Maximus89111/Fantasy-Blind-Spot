@@ -15,7 +15,7 @@
 .toolbar select{max-width:220px}
 @media(max-width:480px){main{padding:10px}section{padding:12px;margin:10px 0}h2{font-size:1.17rem}button{min-height:44px}}
 </style></head><body><header><h1>🏈 Fantasy Blind Spot</h1><div>MY INJURY WATCH · Multi-platform</div></header><main>
-<section id="dashboard"><h2>🏈 My Fantasy Teams</h2><p class="muted">Tap a team to see its players. No more scrolling through every roster.</p><div id="teamTabs" class="tabs" role="tablist" aria-label="Fantasy teams"></div><p id="storageNotice" class="muted" role="status"></p><button type="button" id="backupRosters" class="secondary">⬇️ Back up my teams</button><label class="muted" for="restoreRosters">Restore a previous backup (if available)</label><input id="restoreRosters" type="file" accept=".json,application/json"><button id="addToggle" type="button" class="secondary" aria-expanded="false" aria-controls="connectionSection">＋ Add another fantasy league</button></section>
+<section id="accountPanel"><h2>🔐 My Account</h2><p id="cloudState" class="muted">Checking whether cloud accounts are configured...</p><div id="authBox" class="hide"><label for="authEmail">Email address</label><input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com"><label for="authPassword">Password</label><input id="authPassword" type="password" autocomplete="current-password" placeholder="At least 8 characters"><button type="button" id="signUp">Create account</button><button type="button" class="secondary" id="signIn">Sign in</button></div><div id="authActions" class="hide"><button type="button" id="cloudUpload">☁️ Save my existing teams to account</button><button type="button" class="secondary" id="cloudDownload">⬇️ Retrieve cloud teams</button><button type="button" class="secondary" id="cloudRefresh">🔄 Refresh saved team rosters</button><button type="button" class="secondary" id="signOut">Sign out</button></div><p class="muted" id="cloudFeedback" role="status" aria-live="polite">Your teams on this device stay in place whether or not you sign in.</p></section><section id="dashboard"><h2>🏈 My Fantasy Teams</h2><p class="muted">Tap a team to see its players. No more scrolling through every roster.</p><div id="teamTabs" class="tabs" role="tablist" aria-label="Fantasy teams"></div><p id="storageNotice" class="muted" role="status"></p><button type="button" id="backupRosters" class="secondary">⬇️ Back up my teams</button><label class="muted" for="restoreRosters">Restore a previous backup (if available)</label><input id="restoreRosters" type="file" accept=".json,application/json"><button id="addToggle" type="button" class="secondary" aria-expanded="false" aria-controls="connectionSection">＋ Add another fantasy league</button></section>
 <section id="connectionSection" class="hide"><h2>Connect your fantasy league</h2><label for="platform">Platform</label><select id="platform"><option value="mfl">MyFantasyLeague · Active</option><option value="sleeper">Sleeper · Active</option><option value="yahoo">Yahoo · Coming after API approval</option><option value="espn">ESPN · Public leagues beta</option><option value="nfl">NFL Fantasy · Integration pending</option></select><p id="platformNote" class="muted"></p><p id="fieldInstructions" class="muted">Enter your MFL league ID or link and franchise name. No individual player entry.</p>
 <div id="leagueFields"><div class="row"><div><label id="leagueLabel" for="league">MFL league ID or link</label><input id="league" value="36119" autocomplete="off"></div><div><label for="year">Season</label><input id="year" type="number" value="2026" min="2020" max="2030"></div></div>
 <div id="sleeperName" class="hide"><label for="username">Sleeper username (if no league ID)</label><input id="username" placeholder="Sleeper username"><button type="button" id="allSleeper" class="secondary">⚡ Import ALL my Sleeper leagues</button><p class="muted">Uses your Sleeper username, no password. Imports the rosters owned by your account across 2026 leagues.</p></div><label for="team">Your fantasy franchise name</label><input id="team" value="Space Monkey Mafia"></div><div id="unavailableFields" class="hide" role="status"><h3 id="upcomingTitle"></h3><p id="upcomingMessage"></p><p class="muted">We will not ask for an MFL franchise name or password for this platform.</p></div>
@@ -25,6 +25,73 @@
 <section class="hide"><h2>Future features</h2><p>Account registration, multiple saved leagues, cross-platform integrations, automatic monitoring and opt-in push notifications are next. This version focuses on correctly importing MFL rosters.</p></section>
 </main><script>
 const el=id=>document.getElementById(id);let current=null;
+let cloudConfig=null,cloudSession=null;
+try{cloudSession=JSON.parse(localStorage.getItem('fbs_cloud_session')||'null')}catch(e){}
+const fb=(m)=>{el('cloudFeedback').textContent=m};
+async function cloudRequest(endpoint,options={}){
+ const h={'apikey':cloudConfig.anonKey,'content-type':'application/json',...(options.headers||{})};
+ if(cloudSession?.access_token)h.authorization='Bearer '+cloudSession.access_token;
+ let res=await fetch(cloudConfig.url+endpoint,{...options,headers:h});
+ if(res.status===401&&cloudSession?.refresh_token){
+  let rr=await fetch(cloudConfig.url+'/auth/v1/token?grant_type=refresh_token',{method:'POST',headers:{apikey:cloudConfig.anonKey,'content-type':'application/json'},body:JSON.stringify({refresh_token:cloudSession.refresh_token})});
+  if(rr.ok){cloudSession=await rr.json();localStorage.setItem('fbs_cloud_session',JSON.stringify(cloudSession));h.authorization='Bearer '+cloudSession.access_token;res=await fetch(cloudConfig.url+endpoint,{...options,headers:h})}
+ }
+ if(!res.ok)throw Error((await res.json().catch(()=>({}))).msg||(await res.clone().text().catch(()=>''))||'Cloud request failed '+res.status);
+ return res.status===204?null:res.json();
+}
+async function configureCloud(){
+ try{
+  const response=await fetch('/.netlify/functions/auth-config');
+  if(!response.ok)throw Error('Cloud account setup is not enabled yet.');
+  cloudConfig=await response.json();if(!cloudConfig.configured)throw Error('Cloud account setup is not enabled yet.');
+  el('cloudState').textContent='Cloud accounts are available. You can sign in or create an account.';
+  el('authBox').classList.toggle('hide',Boolean(cloudSession?.access_token));
+  el('authActions').classList.toggle('hide',!cloudSession?.access_token);
+ }catch(e){el('cloudState').textContent='Cloud accounts not configured yet. Your existing imported teams stay stored in this browser.'}
+}
+async function authAction(kind){
+ if(!cloudConfig){fb('Cloud registration is not configured yet.');return}
+ const email=el('authEmail').value.trim(),password=el('authPassword').value;
+ if(!email.includes('@')||password.length<8){fb('Enter an email and password with at least 8 characters.');return}
+ try{
+ const result=await cloudRequest('/auth/v1/'+(kind==='signup'?'signup':'token?grant_type=password'),{method:'POST',body:JSON.stringify({email,password})});
+ if(result.access_token){cloudSession=result;localStorage.setItem('fbs_cloud_session',JSON.stringify(result));fb('Signed in! Use Save my existing teams to account to preserve your imported leagues.');await configureCloud()}
+ else fb('Check your email for a confirmation link, then return and sign in.');
+ }catch(e){fb('Account action failed: '+e.message)}
+}
+el('signUp').addEventListener('click',()=>authAction('signup'));
+el('signIn').addEventListener('click',()=>authAction('signin'));
+el('signOut').addEventListener('click',()=>{cloudSession=null;localStorage.removeItem('fbs_cloud_session');configureCloud();fb('Signed out. This browser still retains its imported teams.')});
+async function accountId(){const u=await cloudRequest('/auth/v1/user');if(!u?.id)throw Error('Please sign in again.');return u.id}
+function identifySaved(item){const parts=(item.key||'').split(':');if(parts[0]==='mfl')return {platform:'mfl',season:Number(parts[1]),league_id:parts[2],franchise_id:parts[3]};if(parts[0]==='sleeper'||parts[0]==='espn')return {platform:parts[0],season:2026,league_id:parts[1],franchise_id:parts[2]};return null}
+async function cloudSave(){
+ try{
+  if(!cloudSession)throw Error('Sign in first.');const uid=await accountId();
+  let count=0;for(const item of saved){
+   const m=identifySaved(item);if(!m)continue;
+   const row={...m,user_id:uid,team_name:item.team.name,league_name:item.leagueName,roster:item.players,updated_at:new Date().toISOString()};
+   await cloudRequest('/rest/v1/fantasy_teams?on_conflict=user_id,platform,league_id,season,franchise_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(row)});
+   count++;
+  }fb('Saved '+count+' of '+saved.length+' local team(s) to your account.'); 
+ }catch(e){fb('Cloud backup failed: '+e.message)}
+}
+async function cloudLoad(){
+ try{
+  if(!cloudSession)throw Error('Sign in first.');
+  const rows=await cloudRequest('/rest/v1/fantasy_teams?select=platform,season,league_id,franchise_id,team_name,league_name,roster&order=updated_at.desc');
+  let restored=0;
+  for(const row of rows){
+   const key=row.platform==='mfl'?['mfl',row.season,row.league_id,row.franchise_id].join(':'):[row.platform,row.league_id,row.franchise_id].join(':');
+   if(saved.some(x=>x.key===key))continue; saved.push({key,team:{id:row.franchise_id,name:row.team_name},leagueName:row.league_name,players:row.roster||[]});restored++;
+  }
+  if(restored){localStorage.setItem('fbs_saved_leagues',JSON.stringify(saved));showSaved();if(!current)showLeague(0)}
+  fb('Retrieved '+restored+' additional team(s). Existing teams on your device were preserved.');
+ }catch(e){fb('Cloud restore failed: '+e.message)}
+}
+el('cloudUpload').addEventListener('click',cloudSave);
+el('cloudDownload').addEventListener('click',cloudLoad);
+el('cloudRefresh').addEventListener('click',async()=>{fb('Roster refresh requires you to select each league and use Import again. Unattended synchronization is not activated yet.')});
+configureCloud();
 let saved=[];let storageWarning='';
 try{
  const stored=localStorage.getItem('fbs_saved_leagues');
