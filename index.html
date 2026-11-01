@@ -15,7 +15,7 @@
 .toolbar select{max-width:220px}
 @media(max-width:480px){main{padding:10px}section{padding:12px;margin:10px 0}h2{font-size:1.17rem}button{min-height:44px}}
 </style></head><body><header><h1>🏈 Fantasy Blind Spot</h1><div>MY INJURY WATCH · Multi-platform</div></header><main>
-<section id="dashboard"><h2>🏈 My Fantasy Teams</h2><p class="muted">Tap a team to see its players. No more scrolling through every roster.</p><div id="teamTabs" class="tabs" role="tablist" aria-label="Fantasy teams"></div><button id="addToggle" type="button" class="secondary" aria-expanded="false" aria-controls="connectionSection">＋ Add another fantasy league</button></section>
+<section id="dashboard"><h2>🏈 My Fantasy Teams</h2><p class="muted">Tap a team to see its players. No more scrolling through every roster.</p><div id="teamTabs" class="tabs" role="tablist" aria-label="Fantasy teams"></div><p id="storageNotice" class="muted" role="status"></p><button type="button" id="backupRosters" class="secondary">⬇️ Back up my teams</button><button id="addToggle" type="button" class="secondary" aria-expanded="false" aria-controls="connectionSection">＋ Add another fantasy league</button></section>
 <section id="connectionSection" class="hide"><h2>Connect your fantasy league</h2><label for="platform">Platform</label><select id="platform"><option value="mfl">MyFantasyLeague · Active</option><option value="sleeper">Sleeper · Active</option><option value="yahoo">Yahoo · Coming after API approval</option><option value="espn">ESPN · Public leagues beta</option><option value="nfl">NFL Fantasy · Integration pending</option></select><p id="platformNote" class="muted"></p><p id="fieldInstructions" class="muted">Enter your MFL league ID or link and franchise name. No individual player entry.</p>
 <div id="leagueFields"><div class="row"><div><label id="leagueLabel" for="league">MFL league ID or link</label><input id="league" value="36119" autocomplete="off"></div><div><label for="year">Season</label><input id="year" type="number" value="2026" min="2020" max="2030"></div></div>
 <div id="sleeperName" class="hide"><label for="username">Sleeper username (if no league ID)</label><input id="username" placeholder="Sleeper username"><button type="button" id="allSleeper" class="secondary">⚡ Import ALL my Sleeper leagues</button><p class="muted">Uses your Sleeper username, no password. Imports the rosters owned by your account across 2026 leagues.</p></div><label for="team">Your fantasy franchise name</label><input id="team" value="Space Monkey Mafia"></div><div id="unavailableFields" class="hide" role="status"><h3 id="upcomingTitle"></h3><p id="upcomingMessage"></p><p class="muted">We will not ask for an MFL franchise name or password for this platform.</p></div>
@@ -25,9 +25,22 @@
 <section class="hide"><h2>Future features</h2><p>Account registration, multiple saved leagues, cross-platform integrations, automatic monitoring and opt-in push notifications are next. This version focuses on correctly importing MFL rosters.</p></section>
 </main><script>
 const el=id=>document.getElementById(id);let current=null;
-let saved=[];try{saved=JSON.parse(localStorage.getItem('fbs_saved_leagues')||'[]')}catch(e){}
+let saved=[];let storageWarning='';
+try{
+ const stored=localStorage.getItem('fbs_saved_leagues');
+ const parsed=stored?JSON.parse(stored):[];
+ if(Array.isArray(parsed))saved=parsed.filter(x=>x&&x.team&&Array.isArray(x.players));else storageWarning='Saved roster format could not be read. Original browser data was not changed.';
+ if(!saved.length){
+  for(const legacyKey of ['fbs-leagues-v1','fbs_saved_leagues_v1','fbs_saved_leagues_backup']){
+   const legacy=localStorage.getItem(legacyKey);if(!legacy)continue;
+   try{const arr=JSON.parse(legacy);if(Array.isArray(arr)&&arr.some(x=>x&&x.team&&Array.isArray(x.players))){saved=arr.filter(x=>x&&x.team&&Array.isArray(x.players));storageWarning='Recovered a previous roster list from this browser.';break}}catch(e){}
+  }
+ }
+}catch(e){storageWarning='Browser storage is unavailable. Try the same Safari browser where your teams were imported.'}
+
 let currentKey=null,showAllInjury=false;
 function showSaved(){
+ el('storageNotice').textContent=storageWarning||(saved.length?('Showing '+saved.length+' locally saved team(s). Your data is stored only in this browser, not yet in an account.'):'No saved teams were found in this browser. Do not clear Safari website data; previously imported teams may still be on the browser or device used before.');
  const tabs=el('teamTabs');
  const totalWatch=saved.reduce((n,x)=>n+(x.players||[]).filter(p=>p.injury).length,0);
  tabs.innerHTML='<button type="button" data-allwatch="1" role="tab" aria-selected="'+showAllInjury+'" class="'+(showAllInjury?'active':'')+'">🚨 All Injuries ('+totalWatch+')</button>'+
@@ -37,7 +50,23 @@ function showSaved(){
 function showLeague(i){const item=saved[i];if(!item)return;current=item;currentKey=item.key;showAllInjury=false;el('filter').value='all';showSaved();render();el('connectionSection').classList.add('hide');el('addToggle').setAttribute('aria-expanded','false')}
 function allWatch(){showAllInjury=true;currentKey=null;const all=saved.flatMap(x=>(x.players||[]).filter(p=>p.injury).map(p=>({...p,rosterTeam:x.team.name})));current={team:{name:'All Teams Injury Watch'},leagueName:saved.length+' leagues',players:all};el('filter').value='watch';showSaved();render();el('connectionSection').classList.add('hide');el('addToggle').setAttribute('aria-expanded','false')}
 
-function remember(key){saved=saved.filter(x=>x.key!==key);saved.unshift({...current,key});try{localStorage.setItem('fbs_saved_leagues',JSON.stringify(saved))}catch(e){}currentKey=key;showAllInjury=false;showSaved()}
+function remember(key){
+ const next=saved.filter(x=>x.key!==key);
+ next.unshift({...current,key});
+ try{
+  const previous=localStorage.getItem('fbs_saved_leagues');
+  if(previous)localStorage.setItem('fbs_saved_leagues_backup',previous);
+  localStorage.setItem('fbs_saved_leagues',JSON.stringify(next));
+  saved=next;
+ }catch(e){storageWarning='Could not save to browser storage. Existing stored teams were not intentionally deleted.';saved=next}
+ currentKey=key;showAllInjury=false;showSaved()
+}
+el('backupRosters').addEventListener('click',()=>{
+ if(!saved.length){alert('No teams are saved in this browser to back up. Try the same Safari browser you used previously.');return}
+ const payload=JSON.stringify({format:'fantasy-blind-spot-backup-v1',exportedAt:new Date().toISOString(),teams:saved},null,2);
+ const file=new Blob([payload],{type:'application/json'});
+ const url=URL.createObjectURL(file),a=document.createElement('a');a.href=url;a.download='fantasy-blind-spot-team-backup.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)
+});
 el('teamTabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.allwatch)allWatch();else if(b.dataset.index!==undefined)showLeague(Number(b.dataset.index))});
 el('addToggle').addEventListener('click',()=>{const box=el('connectionSection'),open=box.classList.toggle('hide')===false;el('addToggle').setAttribute('aria-expanded',String(open));el('addToggle').textContent=open?'✕ Close add league':'＋ Add another fantasy league'});
 function switchPlatform(){
