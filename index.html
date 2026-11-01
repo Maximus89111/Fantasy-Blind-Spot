@@ -4,9 +4,9 @@
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif;background:#0b1422;color:#edf5ff}body{margin:0}header{background:#13263d;padding:22px 16px;border-bottom:3px solid #f0b940}h1{margin:0;font-size:1.65rem}small,.muted{color:#b5c7d9}main{max-width:940px;margin:auto;padding:18px}section{border:1px solid #34475c;background:#132236;border-radius:16px;margin:14px 0;padding:18px}label{display:block;margin:12px 0 6px}input,select,button{font:inherit;border-radius:9px;padding:12px;box-sizing:border-box}input,select{background:#09182a;color:#fff;border:1px solid #526881;width:100%}button{background:#f0b940;color:#131d2b;border:0;font-weight:750;cursor:pointer;margin:12px 8px 0 0}button:disabled{opacity:.5}button.secondary{background:#284666;color:#fff}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.card{padding:12px;border-radius:10px;background:#0c1b2b;margin:7px 0;border-left:4px solid #5c9ac4}.watch{border-color:#efbf46}.out{border-color:#e75a66}.ok{border-color:#48b987}.pill{display:inline-block;padding:3px 8px;border-radius:12px;background:#34475c;font-size:.8rem}.hide{display:none}#message{padding:12px;white-space:pre-wrap}.error{color:#ff9da6}.success{color:#8de6bb}
 </style></head><body><header><h1>🏈 Fantasy Blind Spot</h1><div>MY INJURY WATCH · Multi-platform</div></header><main>
-<section><h2>Connect your fantasy league</h2><label for="platform">Platform</label><select id="platform"><option value="mfl">MyFantasyLeague · Active</option><option value="sleeper">Sleeper · Active</option><option value="yahoo">Yahoo · Coming after API approval</option><option value="espn">ESPN · Integration pending</option><option value="nfl">NFL Fantasy · Integration pending</option></select><p id="platformNote" class="muted"></p><p class="muted">Enter your league ID or MFL URL and team name. We'll find the players for you. No manual player entry.</p>
-<div class="row"><div><label for="league">MFL league ID or link</label><input id="league" value="36119" autocomplete="off"></div><div><label for="year">Season</label><input id="year" type="number" value="2026" min="2020" max="2030"></div></div>
-<div id="sleeperName" class="hide"><label for="username">Sleeper username (if no league ID)</label><input id="username" placeholder="Sleeper username"></div><label for="team">Your fantasy franchise name</label><input id="team" value="Space Monkey Mafia">
+<section><h2>Connect your fantasy league</h2><label for="platform">Platform</label><select id="platform"><option value="mfl">MyFantasyLeague · Active</option><option value="sleeper">Sleeper · Active</option><option value="yahoo">Yahoo · Coming after API approval</option><option value="espn">ESPN · Integration pending</option><option value="nfl">NFL Fantasy · Integration pending</option></select><p id="platformNote" class="muted"></p><p id="fieldInstructions" class="muted">Enter your MFL league ID or link and franchise name. No individual player entry.</p>
+<div id="leagueFields"><div class="row"><div><label id="leagueLabel" for="league">MFL league ID or link</label><input id="league" value="36119" autocomplete="off"></div><div><label for="year">Season</label><input id="year" type="number" value="2026" min="2020" max="2030"></div></div>
+<div id="sleeperName" class="hide"><label for="username">Sleeper username (if no league ID)</label><input id="username" placeholder="Sleeper username"></div><label for="team">Your fantasy franchise name</label><input id="team" value="Space Monkey Mafia"></div><div id="unavailableFields" class="hide" role="status"><h3 id="upcomingTitle"></h3><p id="upcomingMessage"></p><p class="muted">We will not ask for an MFL franchise name or password for this platform.</p></div>
 <div id="leagueChooser" class="hide"><label for="leagueSelect">Select a Sleeper league</label><select id="leagueSelect"></select><button id="chooseLeague" class="secondary">Use selected league</button></div><div id="teamChooser" class="hide"><label for="teamSelect">Choose your team if the name does not match</label><select id="teamSelect"></select><button class="secondary" id="chooseTeam" type="button">Use selected team</button></div><button id="load">🐒 Import my entire roster</button><button class="secondary" id="refresh">Refresh</button>
 <div id="message" role="status" aria-live="polite">Ready to import Former Masters League.</div>
 </section><section id="results" class="hide"><h2 id="title">Your roster</h2><p id="summary"></p><label for="filter">Show players</label><select id="filter"><option value="all">All rostered players</option><option value="watch">Injury Watch only</option></select><div id="roster"></div><p class="muted">Injury statuses depend on MFL's available feed. This page does not yet send automatic background notifications.</p></section>
@@ -17,7 +17,38 @@ let saved=[];try{saved=JSON.parse(localStorage.getItem('fbs_saved_leagues')||'[]
 function showSaved(){el('saved').innerHTML=saved.length?saved.map((x,i)=>'<button class="secondary" data-index="'+i+'">'+escapeHtml(x.leagueName+' · '+x.team.name)+'</button>').join(''):'<p>No leagues imported yet.</p>'}
 function remember(key){saved=saved.filter(x=>x.key!==key);saved.unshift({...current,key});try{localStorage.setItem('fbs_saved_leagues',JSON.stringify(saved))}catch(e){}showSaved()}
 el('saved').addEventListener('click',e=>{let n=e.target.dataset.index;if(n!==undefined&&saved[n]){current=saved[n];render()}});
-function switchPlatform(){let p=el('platform').value;el('sleeperName').classList.toggle('hide',p!=='sleeper');el('load').disabled=!['mfl','sleeper'].includes(p);el('platformNote').textContent=p==='mfl'?'Enter your MFL league ID and franchise name.':p==='sleeper'?'Enter your Sleeper username OR numeric league ID, then choose your team.':'This platform is listed for planned support, but automatic import is not connected yet.';if(p==='sleeper'&&el('league').value==='36119')el('league').value='';el('league').placeholder=p==='sleeper'?'Sleeper league ID (optional with username)':'MFL league ID or URL'}
+function switchPlatform(){
+ const p=el('platform').value,active=['mfl','sleeper'].includes(p);
+ el('leagueFields').classList.toggle('hide',!active);
+ el('unavailableFields').classList.toggle('hide',active);
+ el('sleeperName').classList.toggle('hide',p!=='sleeper');
+ el('leagueChooser').classList.add('hide');el('teamChooser').classList.add('hide');
+ el('load').classList.toggle('hide',!active);el('refresh').classList.toggle('hide',!active);
+ el('load').disabled=!active;
+ if(p==='mfl'){
+ el('leagueLabel').textContent='MyFantasyLeague league ID or URL';
+ el('fieldInstructions').textContent='Enter your MFL league ID or link and franchise name. Player names import automatically.';
+ el('platformNote').textContent='MFL roster import is available.';
+ el('league').value='36119';el('team').value='Space Monkey Mafia';
+ }else if(p==='sleeper'){
+ el('leagueLabel').textContent='Sleeper league ID (optional if using username)';
+ el('fieldInstructions').textContent='Enter your Sleeper username or league ID, then choose your roster.';
+ el('platformNote').textContent='Sleeper roster import is available.';
+ if(el('league').value==='36119')el('league').value='';
+ if(el('team').value==='Space Monkey Mafia')el('team').value='';
+ }else{
+ const labels={yahoo:'Yahoo Fantasy',espn:'ESPN Fantasy Football',nfl:'NFL Fantasy Football'};
+ el('upcomingTitle').textContent=labels[p]+' integration is not active yet';
+ el('upcomingMessage').textContent=p==='yahoo'?
+ 'Yahoo requires a secure Yahoo sign-in and approved API access. When available, you will connect your Yahoo account rather than enter an MFL league ID.':
+ p==='espn'?'ESPN requires its own league-identification and authorization flow. We are not asking for MFL information, and cannot import ESPN rosters yet.':
+ 'NFL Fantasy requires its own league-identification and authorization flow. We are not asking for MFL information, and cannot import NFL Fantasy rosters yet.';
+ el('fieldInstructions').textContent='This platform will have its own connection form when the integration is ready.';
+ el('platformNote').textContent='Not yet connected. Existing imported rosters are still available below.';
+ }
+ el('message').textContent=active?'Select Import my entire roster to retrieve your players.':'No import is available for this platform yet.';
+ el('message').className='muted';
+}
 el('platform').addEventListener('change',switchPlatform);switchPlatform();showSaved();
 async function loadSleeper(chosen){el('load').disabled=true;report('Looking up Sleeper...');try{const number=el('league').value.trim(),username=el('username').value.trim();let q=new URLSearchParams({year:el('year').value});if(/^\d{8,25}$/.test(number))q.set('league',number);else if(username)q.set('username',username);else throw Error('Enter a Sleeper username or numeric Sleeper league ID.');if(chosen)q.set('selected',chosen);const response=await fetch('/.netlify/functions/sleeper?'+q);const data=await response.json();if(!response.ok)throw Error(data.error||'Sleeper import failed');if(data.chooseLeague){el('leagueChooser').classList.remove('hide');el('leagueSelect').innerHTML=data.chooseLeague.map(x=>'<option value="'+escapeHtml(x.id)+'">'+escapeHtml(x.name)+'</option>').join('');report('Select one of your Sleeper leagues.');return}el('leagueChooser').classList.add('hide');window.sleeperData=data;const normalize=t=>String(t||'').toLowerCase().replace(/[^a-z0-9]/g,'');const matches=data.teams.filter(t=>normalize(t.name)===normalize(el('team').value)||normalize(t.owner)===normalize(el('team').value));if(matches.length===1){applySleeper(matches[0]);return}el('teamSelect').innerHTML=data.teams.map(t=>'<option value="'+escapeHtml(t.id)+'">'+escapeHtml(t.name)+' · '+escapeHtml(t.owner)+'</option>').join('');el('teamChooser').classList.remove('hide');report('Choose your Sleeper team from the list below.');}catch(e){report(e.message,true)}finally{el('load').disabled=false}}
 function applySleeper(team){el('teamChooser').classList.add('hide');current={team,players:team.players,leagueName:window.sleeperData.leagueName};remember('sleeper:'+window.sleeperData.leagueId+':'+team.id);render();report('Imported '+team.players.length+' Sleeper players.')}
